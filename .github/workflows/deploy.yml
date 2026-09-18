@@ -1,0 +1,95 @@
+# Runs only on merge to main (after CI passes)
+# Pipeline: build -> push image to GHCR -> deploy to target
+
+# Secrets required:
+  # ANTHROPIC_API_KEY
+  # LISTEN_NOTES_API_KEY
+  # DEPLOY_HOST - SSH host for your server (e.g. your VM IP)
+  # DEPLOY_USER - SSH user on that server
+  # DEPLOY_SSH_KEY - private SSH key (add the public key to the server)
+
+  # The deploy step uses docker compose pull + up on the remote server.
+  # Swap the "Deploy" step for a Hugging Face Spaces push, Railway deploy,
+  # or any other target - the build/push steps stay the same.
+
+
+name: Deploy 
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Build, Push & Deploy 
+    runs-on: ubuntu-latest 
+
+    permissions:
+      contents: read 
+      packages: write # needed to push GitHub Container Registry (GHCR)
+
+    env:
+      REGISTRY: ghcr.io 
+      IMAGE_NAME: ${{ github.repository }} # e.g. yourname/podcast-summarizer
+
+    steps:
+      - uses: actions/checkout@v4 
+
+      # Build
+      - name: Set up Docker Buildx 
+        uses: docker/setup-buildx-action@v3 
+
+      - name: Log in to GHCR 
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # auto-provided, no manual secret needed
+
+      - name: Extract Docker metadata
+        id: meta 
+        uses: docker/metadata-action@v5 
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value-latest,enable={{is_default_branch}}
+
+
+      - name: Build and push image 
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: infra/Dockerfile 
+          push: true 
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max 
+
+      # Deploy
+      - name: Deploy to server via SSH 
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd ~/podcast-summarizer 
+
+            # Pull latest image 
+            echo ${{ secrets.GITHUB_TOKEN }} | \
+              docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose pull 
+
+            # Zero-downtime restart: bring up new container before stopping old
+            docker compose up -d --no-deps --build api 
+
+            # Prune old images to save disk space 
+            docker image prune -f 
+
+      # Notify
+      - name: Confirm deployment 
+        run: |
+          echo "Deployed ${{ env.IMAGE_NAME }}@${{ github.sha }} to ${{secrets.DEPLOY_HOST }}"
+

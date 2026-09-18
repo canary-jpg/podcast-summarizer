@@ -1,0 +1,116 @@
+# Runs on a schedule (nightly) and on every merge to main.
+# Summarizes a fixed set of "golden" test episodes, scores them,
+# and blocks the deploy pipeline if quality drops below thresholds.
+
+# This is the ML-specific CI step - the equivalent of unit test
+# but for model quality rather than code correctness.
+
+# How it works:
+# 1. Fetch + summarize a small set of pinned "golden" episodes
+#   (same episodes every run, so results are comparable over time)
+# 2. Run the full evaluator (LLM judge + ROUGE if references exist)
+# 3. run_eval.py --ci_mode exits non-zero if any threshold fails
+# 4. GitHub Actions marks the workflow as failed, blocking deploy.yml
+
+# Secrets required:
+# ANTHROPIC_API_KEY
+# LISTEN_NOTES_API_KEY
+
+# To add golden episodes: add their IDs to GOLDEN_EPISODES_IDS below,
+# and optionally add a reference summary to tests/fixtures/references/.
+
+name: Eval Gate 
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *" #nightly at 3am UTC
+  workflow_dispatch: # allow manual trigger from GitHub UI
+
+jobs:
+  eval-gate:
+    name: Quality Gate 
+    runs-on: ubuntu-latest
+
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LISTEN_NOTES_API_KEY: ${{ secrets.LISTEN_NOTES_API_KEY }}
+      LOG_LEVEL: INFO 
+
+    steps:
+      - uses: actions/checkout@v4 
+
+      - name: Set up Python 
+        uses: actions/setup-python@v5 
+        with:
+          python-version: "3.11"
+          cache: pip 
+
+      - name: Install dependencies 
+        run: | 
+          pip install -r infra/requirements.txt 
+          # NLTK data for preprocessing
+          python -m nltk.downloader punkt punkt_tab
+
+      # Run pipeline on golden episodes
+      - name: Ingest golden episodes 
+        run: |
+          # Use --no_transcribe for speed in CI, descriptions only.
+          # For a more thorough gate, remove this flag (slower, costs more).
+          python ingestion/fetch_episodes.py \
+            --podcast_id ${{ vars.GOLDEN_PODCAST_ID }} \
+            --max_episodes 3 \
+            --no_transcribe
+
+      - name: Preprocess 
+        run: python ingestion/preprocess.py 
+
+      - name: Summarize 
+        run: | 
+          python summarization/summarizer.py \
+            --provider anthropic \ 
+            --prompt_version ${{ vars.PROMPT_VERSION || 'v1' }}
+
+      # Evaluate against thresholds
+      - name: Run evaluator (CI mode)
+        id: eval 
+        run: |
+          python evaluation/run_eval.py \
+            --reference_dir tests/fixtures/references \
+            --ci_mode
+      #ci_mode exits 1 if any episode fails thresholds defined in
+      #configs/eval_thresholds.yaml - Github Actions treats that as failure
+
+      # Upload results as artifact (visible in Actions UI)
+      - name: Upload eval results
+        if: always() #upload even when eval fails, so you can inspect scores
+        uses: actions/upload-artifact@v4 
+        with:
+          name: eval-results-${{ github.sha }}
+          path: |
+            data/eval_results/
+          retention-days: 30 
+
+      # Log to monitoring DB
+      - name: Log results to monitoring DB 
+        if: always()
+        run: python monitoring/log_io.py --all 
+
+      # Drift check (informational, does not block)
+      - name: Drift Report 
+        if: always()
+        run: |
+          python monitoring/drift_report.py \
+            --ouput data/eval_results/drift_report.json \
+            --baseline_days 30 \
+            --recent_days 7
+        continue-on-error: true # drift is a warning, not a hard block (yet)
+
+      - name: Upload drift report 
+        if: always()
+        uses: actions/upload-artifact@v4 
+        with:
+          name: drift-report-${{ github.sha }}
+          push: data/eval_results/drift_report.json 
+          retention-days: 30 

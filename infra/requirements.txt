@@ -1,0 +1,47 @@
+# infra/requirements.txt
+#
+# Pin major versions for reproducibility; allow minor/patch updates.
+# Install with: pip install -r infra/requirements.txt
+#
+# Optional extras are grouped and commented — install only what you need.
+
+# ── Web / API ──────────────────────────────────────────────────────────────────
+fastapi>=0.111,<1.0
+uvicorn[standard]>=0.29,<1.0
+pydantic>=2.7,<3.0
+httpx>=0.27,<1.0              # async HTTP client (used in tests)
+
+# ── LLM providers ─────────────────────────────────────────────────────────────
+anthropic>=0.28,<1.0
+openai>=1.30,<2.0             # also covers local/Ollama endpoints
+
+# ── Ingestion ─────────────────────────────────────────────────────────────────
+requests>=2.31,<3.0
+feedparser>=6.0,<7.0          # RSS parsing fallback
+openai-whisper>=20231117      # Whisper ASR — installs torch as a dependency
+
+# ── Preprocessing ─────────────────────────────────────────────────────────────
+tiktoken>=0.7,<1.0            # token counting (matches GPT-4 / Claude tokenisation)
+nltk>=3.8,<4.0                # sentence boundary detection
+
+# ── Evaluation ────────────────────────────────────────────────────────────────
+rouge-score>=0.1.2,<1.0       # ROUGE-1/2/L
+bert-score>=0.3.13,<1.0       # BERTScore (downloads a small transformer model on first run)
+scipy>=1.13,<2.0              # Welch t-test in drift_report.py
+
+# ── Experiment tracking (optional) ────────────────────────────────────────────
+wandb>=0.17,<1.0              # remove if not using --track
+
+# ── Config & env ──────────────────────────────────────────────────────────────
+python-dotenv>=1.0,<2.0
+pyyaml>=6.0,<7.0
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=8.0,<9.0
+pytest-cov>=5.0,<6.0
+pytest-asyncio>=0.23,<1.0
+
+# ── Linting & formatting (dev only) ───────────────────────────────────────────
+ruff>=0.4,<1.0
+black>=24.0,<25.0
+mypy>=1.10,<2.0

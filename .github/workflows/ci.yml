@@ -1,0 +1,119 @@
+# Runs on every pull request and push to main.
+# Pipeline: lint -> type check -> unit tests -> build Docker image
+
+# Secrets required (set in GitHub repo Settings -> Secrets):
+# ANTHROPIC_API_KEY - used by tests that call the LLM judge
+# LISTEN_NOTES_API_KEY - used by ingestion tests (mocked in unit tests)
+
+name: CI 
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # 1. Lint & format
+  lint:
+    name: Lint & format
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip 
+
+      - name: Install lint tools
+        run: pip install ruff black
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: Black (format check)
+        run: black --check .
+
+  # 2. Type checking
+  typecheck:
+    name: Type Check 
+    name: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4 
+
+      - name: Set up Python
+        uses: actions/setup-python@v5 
+        with:
+          python-version: "3.11"
+          cache: pip 
+
+      - name: Install dependencies
+        run: pip install -r infra/requirements.txt mypy 
+
+      - name: mypy 
+        run: mypy ingestion/ summarization/ evaludation/ monitoring/ api/ --ignore-missing-imports
+
+# 3. Unit tests
+test: 
+  name: Unit Tests 
+  runs-on: ubuntu-latest
+  needs: lint 
+
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    LISTEN_NOTES_API_KEY: ${{ secrets.LISTEN_NOTES_API_KEY }}
+    LOG_LEVEL: WARNING #quieter test output
+
+  steps:
+    - uses: actions/checkout@v4 
+
+    - name: Set up Python 
+      uses: actions/setup-python@v5 
+      with:
+        python-version: "3.11"
+        cache: pip 
+
+    - name: Install dependencies 
+      run: pip install -r infra/requirements.txt pytest pytest-cov pytest-asyncio httpx
+
+    - name: Run tests 
+      run: | 
+        pytest tests/ \
+          --cov=ingestion --cov=summarization --cov=evaluation --cov=monitoring --cov=api \
+
+          --cov-report=term-missing \
+          --cov-report=xml \
+          -v 
+
+    - name: Upload coverage report 
+      uses: codecov/codecov-action@v4 
+      with:
+        file: coverage.xml 
+        fail_ci_if_error: false # coverage upload failure shouldn't block CI 
+
+  
+  # 4. Build Docker image
+  build:
+    name: Build Docker Image 
+    runs-on: ubuntu-latest
+    needs: test 
+
+    steps:
+      - uses: actions/checkout@v4 
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3 
+
+      - name: Build image (no push on PR)
+        uses: docker/build-push-action@v5 
+        with:
+          context: .
+          file: infra/Dockerfile
+          push: false # push only happes if deploy.yml on merge to main
+          tags: podcast-summarizer:${{ github.sha }}
+          cache-from: type=gha 
+          cache-to: type=gha,mode=max 

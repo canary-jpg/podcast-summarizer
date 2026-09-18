@@ -1,0 +1,30 @@
+# ── Secrets ──────────────────────────────────────────────────────────────────
+.env
+
+# ── Data (can be large — store locally or in S3, not git) ────────────────────
+data/raw/
+data/processed/
+data/outputs/
+data/eval_results/
+data/monitoring.db
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# ── Notebooks ─────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Models ────────────────────────────────────────────────────────────────────
+*.pt
+*.bin
+*.gguf

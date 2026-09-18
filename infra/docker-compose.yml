@@ -1,0 +1,30 @@
+# Local development stack.
+# Run with: docker compose up 
+
+# Services:
+#   api - FastAPI on port 8000
+
+# Data directories are bind-mounted so summaries and the monitoring DB
+# persist across container restarts and are accessible from your host
+
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile 
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env # picks up your local .env file 
+    volumes:
+      - ../data/:/app/data # persists summaries, eval results, monitorning DB 
+      - ../configs:/app/config # live-reload prompt changes without rebuild
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s 
+      timeout: 10s 
+      retries: 3 
+      start_period: 15s 
