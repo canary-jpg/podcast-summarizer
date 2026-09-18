@@ -163,7 +163,7 @@ def log_eval(eval_result: dict, conn: sqlite3.Connection) -> bool:
     now = datetime.now(tz=timezone.utc).isoformat()
     rouge = eval_result.get("rouge") or {}
     bertscore = eval_result.get("bertscore") or {}
-    judge = eval_result.get("llm_judge") or {}
+    judge = eval_result  # scores stored as flat keys e.g. judge_overall
 
     try:
         conn.execute(
@@ -185,11 +185,11 @@ def log_eval(eval_result: dict, conn: sqlite3.Connection) -> bool:
                 rouge.get("rouge2_f"),
                 rouge.get("rougeL_f"),
                 bertscore.get("f1"),
-                judge.get("faithfulness"),
-                judge.get("coverage"),
-                judge.get("fluency"),
-                judge.get("conciseness"),
-                judge.get("overall"),
+                eval_result.get("judge_faithfulness"),
+                eval_result.get("judge_coverage"),
+                eval_result.get("judge_fluency"),
+                eval_result.get("judge_conciseness"),
+                eval_result.get("judge_overall"),
                 int(eval_result.get("passed_thresholds", True)),
                 int(eval_result.get("has_reference", False)),
                 eval_result.get("evaluated_at"),
@@ -245,7 +245,7 @@ def show_recent(conn: sqlite3.Connection, limit: int = 20):
     print("\n" + header)
     print("-" * len(header))
     for r in rows:
-        judge = f"r['judge_overall']:.1f" if r["judge_overall"] else "   -  "
+        judge = f"{r['judge_overall']:.1f}" if r["judge_overall"] else "   -  "
         passed = "✓" if r["passed_thresholds"] else "✗"
         print(
             f"{(r['episode_id']):<20} {(r['model'] or ''):<30} {(r['prompt_version'] or ''):<6} " 
